@@ -19,7 +19,10 @@ from multimodal_ai import MultimodalModelManager
 
 HOST = "0.0.0.0"
 PORT = 8787
-ADB = r"C:\Users\Lenovo\.vela\sdk\tools\adb\win\adb.exe"
+ADB = os.environ.get(
+    "WRISTSPACE_ADB",
+    os.path.join(os.path.expanduser("~"), ".vela", "sdk", "tools", "adb", "win", "adb.exe"),
+)
 WATCH_PACKAGE = "com.application.watch.demo"
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(APP_DIR, "aiot_config.json")
@@ -668,13 +671,14 @@ class AiotCommandCenter:
             "threshold": model.get("threshold", 80),
         }
 
-    def resolve_training_action(self, action_id=None):
+    def resolve_training_action(self, action_id=None, update_target=True):
         key = (action_id or self.training_action_id or "").strip()
         if key:
             for action in self.actions:
                 if action.get("id") == key or action.get("name") == key:
                     self.training_action_id = action.get("id", "")
-                    self.set_target_device(action.get("deviceId") or action.get("targetDeviceId"))
+                    if update_target:
+                        self.set_target_device(action.get("deviceId") or action.get("targetDeviceId"))
                     return action
             return None
         actions = self.current_device_actions()
@@ -957,6 +961,8 @@ class AiotCommandCenter:
             self.log("收到手表回传: {}".format(payload))
             return
         payload_type = payload.get("type", "")
+        now = time.time()
+        now_ms = int(now * 1000)
         if payload_type == "watch_input_command":
             self.last_watch_input = payload
             operation = payload.get("operation") or payload.get("sourceText") or ""

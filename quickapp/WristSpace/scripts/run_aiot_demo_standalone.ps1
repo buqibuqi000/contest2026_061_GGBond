@@ -1,8 +1,8 @@
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$adb = "C:\Users\Lenovo\.vela\sdk\tools\adb\win\adb.exe"
-$emulator = "C:\Users\Lenovo\.vela\sdk\emulator\windows-x86_64\emulator.exe"
+$adb = Join-Path $env:USERPROFILE ".vela\sdk\tools\adb\win\adb.exe"
+$emulator = Join-Path $env:USERPROFILE ".vela\sdk\emulator\windows-x86_64\emulator.exe"
 $dist = Join-Path $repoRoot "quickapp\WristSpace\dist"
 $rpk = (Get-ChildItem $dist -Filter "com.application.watch.demo.debug.*.rpk" | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
 $upper = Join-Path $repoRoot "pc\Aiot_PyCharm\main.py"
@@ -123,7 +123,7 @@ $health | ConvertTo-Json -Depth 6 | Out-Host
 
 if (-not $health -or $health.lastPollAt -eq 0) {
     Write-Host "The app is still not polling. Try clicking the app icon in the emulator, then run:"
-    Write-Host "  C:\Users\Lenovo\.vela\sdk\tools\adb\win\adb.exe -s emulator-5554 shell am start com.application.watch.demo"
+    Write-Host "  $adb -s emulator-5554 shell am start com.application.watch.demo"
 } else {
     Invoke-RestMethod -Uri "http://127.0.0.1:8787/aiot-command" -Method Post -ContentType "application/json; charset=utf-8" -Body '{"action":"reset_state"}' | Out-Null
     Write-Host "Done: wrist-control app is running in a standalone emulator window."

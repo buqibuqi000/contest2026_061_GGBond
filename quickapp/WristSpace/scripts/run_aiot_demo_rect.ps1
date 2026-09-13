@@ -1,8 +1,8 @@
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$adb = "C:\Users\Lenovo\.vela\sdk\tools\adb\win\adb.exe"
-$emulator = "C:\Users\Lenovo\.vela\sdk\emulator\windows-x86_64\emulator.exe"
+$adb = Join-Path $env:USERPROFILE ".vela\sdk\tools\adb\win\adb.exe"
+$emulator = Join-Path $env:USERPROFILE ".vela\sdk\emulator\windows-x86_64\emulator.exe"
 $python = "D:\MinConda\python.exe"
 if (-not (Test-Path $python)) { $python = "python" }
 $dist = Join-Path $repoRoot "quickapp\WristSpace\dist"
@@ -87,9 +87,7 @@ function Stop-DeviceVapp {
     }
     for ($i = 0; $i -lt 10; $i++) {
         $remaining = (& $adb -s emulator-5554 shell "pidof $package" 2>$null) -join " "
-        if (-not ($remaining -match '\d')) {
-            break
-        }
+        if (-not ($remaining -match '\d')) { break }
         Start-Sleep -Milliseconds 300
     }
     if ((& $adb -s emulator-5554 shell "pidof $package" 2>$null) -match '\d') {
@@ -102,11 +100,7 @@ function Start-VappJob {
     param([string]$Reason)
     Write-Host "Start wrist-control app by vapp ($Reason)..."
     return Start-Process -FilePath $adb -WindowStyle Hidden -PassThru -ArgumentList @(
-        "-s",
-        "emulator-5554",
-        "shell",
-        "vapp",
-        "app/$package"
+        "-s", "emulator-5554", "shell", "vapp", "app/$package"
     )
 }
 

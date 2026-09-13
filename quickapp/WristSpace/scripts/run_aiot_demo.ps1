@@ -1,8 +1,8 @@
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$adb = "C:\Users\Lenovo\.vela\sdk\tools\adb\win\adb.exe"
-$emulator = "C:\Users\Lenovo\.vela\sdk\emulator\windows-x86_64\emulator.exe"
+$adb = Join-Path $env:USERPROFILE ".vela\sdk\tools\adb\win\adb.exe"
+$emulator = Join-Path $env:USERPROFILE ".vela\sdk\emulator\windows-x86_64\emulator.exe"
 $dist = Join-Path $repoRoot "quickapp\WristSpace\dist"
 $rpk = (Get-ChildItem $dist -Filter "com.application.watch.demo.debug.*.rpk" | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
 $upper = Join-Path $repoRoot "pc\Aiot_PyCharm\main.py"

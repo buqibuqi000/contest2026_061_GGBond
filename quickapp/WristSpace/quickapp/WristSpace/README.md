@@ -14,7 +14,7 @@
 ## 运行
 
 ```powershell
-cd E:\WristSpace\quickapp\WristSpace
+cd D:\xue\XIAOMI\WristSpace\quickapp\WristSpace
 npm install
 npm run demo:rect
 ```
@@ -22,6 +22,6 @@ npm run demo:rect
 如需同时启动 PC 上位机：
 
 ```powershell
-cd E:\WristSpace\quickapp\WristSpace
+cd D:\xue\XIAOMI\WristSpace\quickapp\WristSpace
 npm run demo:all
 ```

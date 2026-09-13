@@ -816,7 +816,7 @@ class ModernBridgeApp:
         }
 
     def resolve_training_action(self):
-        action = self.center.resolve_training_action(self.training_action.get().strip())
+        action = self.center.resolve_training_action(self.training_action.get().strip(), update_target=True)
         if action:
             self.training_action.set(action.get("name", action.get("id", "")))
         return action
@@ -976,7 +976,7 @@ class ModernBridgeApp:
         self.refresh_header()
 
     def refresh_training_fields(self, force_reference=False):
-        action = self.center.resolve_training_action(self.training_action.get().strip())
+        action = self.center.resolve_training_action(self.training_action.get().strip(), update_target=False)
         if not action:
             self.workflow_status.set("流程：等待配置动作")
             self.training_status.set(

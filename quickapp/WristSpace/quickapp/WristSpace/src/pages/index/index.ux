@@ -31,6 +31,11 @@
           <text class="current-name">{{currentDeviceName}}</text>
           <text class="current-state">{{currentStatusText}} · {{currentValueText}}</text>
         </div>
+        <div class="progress-line">
+          <text class="progress-label">调节进度</text>
+          <text class="progress-bar">{{adjustProgressBarText}}</text>
+          <text class="progress-value">{{adjustProgressText}}</text>
+        </div>
         <text class="status-command">{{commandText}} · {{confidenceText}} · {{syncSeqText}}</text>
       </div>
 
@@ -637,8 +642,7 @@ export default {
     aboutVisible: false,
     pcUrl: 'http://10.0.2.2:8787/aiot-command',
     pcUrls: [
-      'http://10.0.2.2:8787/aiot-command',
-      'http://127.0.0.1:8787/aiot-command'
+      'http://10.0.2.2:8787/aiot-command'
     ],
     pcUrlIndex: 0,
     pcRetryTimer: null,
@@ -647,6 +651,10 @@ export default {
     pcPolling: false,
     pcBusy: false,
     pcFailCount: 0,
+    pcEverConnected: false,
+    lastPcOkAt: 0,
+    pcOfflineAfterMs: 8000,
+    pcOfflineFailThreshold: 4,
     quickCommandAt: 0,
     multimodalRequestAt: 0,
     lastSeq: 0,
@@ -710,6 +718,8 @@ export default {
     clockMetaText: '1月1日 · 周一',
     clockSourceText: '本地时钟',
     confidenceText: '等待数据',
+    adjustProgressText: '0%',
+    adjustProgressBarText: '□□□□□',
     sensorLinkText: 'IMU + EMG',
     syncSeqText: '#0',
     clockTimer: null,
@@ -901,10 +911,15 @@ export default {
         this.pcRequestTimer = null
         this.pcBusy = false
         this.pcFailCount = 0
+        this.pcEverConnected = true
+        this.lastPcOkAt = new Date().getTime()
         this.connectionBadge = 'ONLINE'
         this.connectionText = 'PC 上位机已连接'
+        if (this.commandText === '正在检测 PC 服务' || this.commandText.indexOf('连接重试') === 0 || this.commandText.indexOf('链路检测') === 0 || this.commandText.indexOf('保持在线') === 0) {
+          this.commandText = '等待命令'
+        }
         this.applyPcPayload(ret.data)
-        this.schedulePcPoll(30)
+        this.schedulePcPoll(300)
       },
       fail: () => {
         if (this.pcRequestToken !== requestToken) {
@@ -922,18 +937,28 @@ export default {
 
   handlePcFailure() {
     this.pcFailCount += 1
-    this.connectionBadge = 'OFFLINE'
-    this.connectionText = 'PC 上位机未连接'
-    if (this.pcFailCount === 1) {
-      this.commandText = '正在检测 PC 服务'
+    const now = new Date().getTime()
+    const lastOkAt = this.lastPcOkAt || 0
+    const recentlyOnline = lastOkAt > 0 && now - lastOkAt < this.pcOfflineAfterMs
+    const shouldShowOffline = !this.pcEverConnected && this.pcFailCount >= this.pcOfflineFailThreshold && !recentlyOnline
+    if (shouldShowOffline) {
+      this.connectionBadge = 'OFFLINE'
+      this.connectionText = 'PC 上位机未连接'
+      this.sensorLinkText = '等待连接'
+    } else if (this.connectionBadge === 'ONLINE') {
+      this.connectionText = 'PC 上位机已连接'
     } else {
-      this.commandText = '连接重试 ' + this.pcFailCount
+      this.connectionBadge = 'WAIT'
+      this.connectionText = '正在恢复 PC 连接'
     }
-    if (this.pcFailCount >= 2 && this.pcUrls.length > 1) {
+    if (shouldShowOffline) {
+      this.commandText = '等待 PC 上位机启动'
+    }
+    if (this.pcFailCount >= this.pcOfflineFailThreshold && this.pcUrls.length > 1) {
       this.rotatePcUrl()
     }
     if (this.pcPolling) {
-      this.schedulePcPoll(this.pcFailCount >= 2 ? 1200 : 500)
+      this.schedulePcPoll(this.pcFailCount >= this.pcOfflineFailThreshold ? 1200 : 500)
     }
   },
 
@@ -956,7 +981,9 @@ export default {
     }
     this.pcUrlIndex = (this.pcUrlIndex + 1) % this.pcUrls.length
     this.pcUrl = this.pcUrls[this.pcUrlIndex]
-    this.connectionText = '切换 PC 连接通道'
+    if (this.connectionBadge !== 'ONLINE') {
+      this.connectionText = '切换 PC 连接通道'
+    }
   },
 
   reconnectPc() {
@@ -1072,6 +1099,9 @@ export default {
         this.markDecisionExecuted(payload)
         return
       }
+      this.commandText = '未绑定手势，已忽略：' + this.gestureCommandLabel(command)
+      this.markDecisionBlocked(payload, '当前设备没有绑定这个手势，设备状态未改变。')
+      return
     }
     if (command === 'swing_up') {
       this.setCurrentPower(true)
@@ -1268,14 +1298,58 @@ export default {
     return null
   },
 
-  setRuntimeState(deviceId, state, value) {
+  setRuntimeState(deviceId, state, value, progress) {
     let runtime = this.findRuntimeState(deviceId)
     if (!runtime) {
-      runtime = { id: deviceId, state: state, value: value }
+      runtime = { id: deviceId, state: state, value: value, progress: 0 }
       this.runtimeStates.push(runtime)
     }
     runtime.state = state
     runtime.value = value
+    if (typeof progress === 'number') {
+      runtime.progress = this.clamp(parseInt(progress, 10), 0, 100)
+    } else if (typeof runtime.progress !== 'number') {
+      runtime.progress = this.progressFromValue(value)
+    }
+  },
+
+  progressFromValue(value) {
+    const text = String(value || '')
+    if (text.indexOf('%') >= 0) {
+      const parsed = parseInt(text, 10)
+      if (!isNaN(parsed)) {
+        return this.clamp(parsed, 0, 100)
+      }
+    }
+    return 0
+  },
+
+  getRuntimeProgress(deviceId) {
+    if (deviceId === 'light') {
+      return this.clamp(this.lightLevel || 0, 0, 100)
+    }
+    if (deviceId === 'speaker') {
+      return this.clamp(this.volume || 0, 0, 100)
+    }
+    if (deviceId === 'ac') {
+      return this.clamp(Math.round(((this.temperature || 16) - 16) * 100 / 14), 0, 100)
+    }
+    const runtime = this.findRuntimeState(deviceId)
+    if (runtime && typeof runtime.progress === 'number') {
+      return this.clamp(runtime.progress, 0, 100)
+    }
+    return runtime ? this.progressFromValue(runtime.value) : 0
+  },
+
+  updateAdjustProgress() {
+    const progress = this.getRuntimeProgress(this.currentDeviceId)
+    this.adjustProgressText = progress + '%'
+    const filled = Math.round(progress / 20)
+    let bar = ''
+    for (let index = 0; index < 5; index++) {
+      bar += index < filled ? '■' : '□'
+    }
+    this.adjustProgressBarText = bar
   },
 
   resetStates() {
@@ -1291,9 +1365,10 @@ export default {
     for (let index = 0; index < this.runtimeStates.length; index++) {
       this.runtimeStates[index].state = '关闭'
       this.runtimeStates[index].value = this.runtimeStates[index].id === 'light' || this.runtimeStates[index].id === 'speaker' ? '0%' : '待机'
+      this.runtimeStates[index].progress = 0
     }
-    this.setRuntimeState('ac', '关闭', '关闭')
-    this.setRuntimeState('curtain', '关闭', '日常')
+    this.setRuntimeState('ac', '关闭', '关闭', 0)
+    this.setRuntimeState('curtain', '关闭', '日常', 0)
     this.updateCurrentStatus()
   },
 
@@ -1301,17 +1376,17 @@ export default {
     if (this.currentDeviceId === 'light') {
       this.lightLevel = enabled ? (this.lightLevel > 0 ? this.lightLevel : 50) : 0
       this.lightStateText = enabled ? '开启' : '关闭'
-      this.setRuntimeState('light', this.lightStateText, this.lightLevel + '%')
+      this.setRuntimeState('light', this.lightStateText, this.lightLevel + '%', this.lightLevel)
     } else if (this.currentDeviceId === 'ac') {
       this.acStateText = enabled ? '开启' : '关闭'
-      this.setRuntimeState('ac', this.acStateText, enabled ? this.temperature + '℃' : '关闭')
+      this.setRuntimeState('ac', this.acStateText, enabled ? this.temperature + '℃' : '关闭', enabled ? this.getRuntimeProgress('ac') : 0)
     } else if (this.currentDeviceId === 'curtain') {
       this.curtainStateText = enabled ? '开启' : '关闭'
-      this.setRuntimeState('curtain', this.curtainStateText, this.sceneName)
+      this.setRuntimeState('curtain', this.curtainStateText, this.sceneName, enabled ? this.getRuntimeProgress('curtain') : 0)
     } else if (this.currentDeviceId === 'speaker') {
       this.volume = enabled ? (this.volume > 0 ? this.volume : 45) : 0
       this.speakerStateText = enabled ? '播放' : '静音'
-      this.setRuntimeState('speaker', this.speakerStateText, this.volume + '%')
+      this.setRuntimeState('speaker', this.speakerStateText, this.volume + '%', this.volume)
     } else {
       this.setRuntimeState(this.currentDeviceId, enabled ? '开启' : '关闭', enabled ? '运行中' : '待机')
     }
@@ -1322,16 +1397,18 @@ export default {
     if (this.currentDeviceId === 'light') {
       this.lightLevel = this.clamp(this.lightLevel + delta, 0, 100)
       this.lightStateText = this.lightLevel > 0 ? '开启' : '关闭'
-      this.setRuntimeState('light', this.lightStateText, this.lightLevel + '%')
+      this.setRuntimeState('light', this.lightStateText, this.lightLevel + '%', this.lightLevel)
     } else if (this.currentDeviceId === 'speaker') {
       this.volume = this.clamp(this.volume + delta, 0, 100)
       this.speakerStateText = this.volume > 0 ? '播放' : '静音'
-      this.setRuntimeState('speaker', this.speakerStateText, this.volume + '%')
+      this.setRuntimeState('speaker', this.speakerStateText, this.volume + '%', this.volume)
     } else if (this.currentDeviceId === 'ac') {
       this.temperature = this.clamp(this.temperature + (delta > 0 ? 1 : -1), 16, 30)
-      this.setRuntimeState('ac', this.acStateText, this.acStateText === '开启' ? this.temperature + '℃' : '关闭')
+      this.setRuntimeState('ac', this.acStateText, this.acStateText === '开启' ? this.temperature + '℃' : '关闭', this.getRuntimeProgress('ac'))
     } else {
-      this.setRuntimeState(this.currentDeviceId, '已调节', delta > 0 ? '调高' : '调低')
+      const runtime = this.findRuntimeState(this.currentDeviceId)
+      const progress = this.clamp((runtime && typeof runtime.progress === 'number' ? runtime.progress : 0) + delta, 0, 100)
+      this.setRuntimeState(this.currentDeviceId, progress > 0 ? '已调节' : '关闭', progress + '%', progress)
     }
     this.updateCurrentStatus()
   },
@@ -1462,6 +1539,22 @@ export default {
     this.sendWatchConfig('update_safety_guard', this.safetyGuardText)
   },
 
+  gestureCommandLabel(command) {
+    if (command === 'swing_up') {
+      return '上摆'
+    }
+    if (command === 'swing_down') {
+      return '下摆'
+    }
+    if (command === 'rotate_cw') {
+      return '顺时针'
+    }
+    if (command === 'rotate_ccw') {
+      return '逆时针'
+    }
+    return command || '未知手势'
+  },
+
   findBoundTriggerAction(triggerCommand) {
     const actions = this.getCurrentActions()
     for (let index = 0; index < actions.length; index++) {
@@ -1559,6 +1652,12 @@ export default {
       this.trainingHintText = workflow.label ? workflow.label : '模型训练完成，可进行实时识别'
       this.learningStateText = '可识别'
       this.inferenceButtonText = '开始识别'
+    } else if (payload.command === 'sync_config' || payload.command === 'sync_models') {
+      this.trainingHintText = (payload.label || '配置同步') + ' · 已更新'
+      this.learningStateText = '已同步'
+    }
+    if (payload.command === 'sync_config') {
+      this.commandText = (payload.label || '同步配置') + ' · 已更新 #' + (payload.seq || this.lastSeq)
     }
   },
 
@@ -1703,8 +1802,7 @@ export default {
         }
       },
       fail: () => {
-        this.connectionBadge = 'OFFLINE'
-        this.connectionText = 'PC 上位机未连接'
+        this.handlePcFailure()
       }
     })
   },
@@ -1921,6 +2019,7 @@ export default {
       this.currentStatusText = '关闭'
       this.currentValueText = '待机'
     }
+    this.updateAdjustProgress()
   },
 
   localAddDevice() {
@@ -3059,12 +3158,16 @@ export default {
       success: () => {
         this.managementMessage = label + ' · 已同步 PC'
         this.managementSubMessage = 'PC 已接收：' + operation + ' / v' + this.configVersion
+        this.pcFailCount = 0
+        this.pcEverConnected = true
+        this.lastPcOkAt = new Date().getTime()
         this.connectionBadge = 'ONLINE'
+        this.connectionText = 'PC 上位机已连接'
       },
       fail: () => {
         this.managementMessage = label + ' · 本地已保存，PC 待同步'
         this.managementSubMessage = '请确认上位机 8787 服务已启动'
-        this.connectionBadge = 'OFFLINE'
+        this.handlePcFailure()
       }
     })
   },
@@ -3375,7 +3478,7 @@ export default {
 
 .status-card {
   width: 100%;
-  height: 101px;
+  height: 119px;
   background-color: #121A27;
   border-radius: 9px;
   padding: 11px;
@@ -3421,6 +3524,33 @@ export default {
 .current-state {
   color: #9BA8BC;
   font-size: 12px;
+}
+
+.progress-line {
+  width: 100%;
+  flex-direction: row;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.progress-label {
+  width: 60px;
+  color: #8FA1B8;
+  font-size: 10px;
+}
+
+.progress-bar {
+  flex: 1;
+  color: #6FE4D1;
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+
+.progress-value {
+  width: 38px;
+  color: #FFFFFF;
+  font-size: 11px;
+  text-align: right;
 }
 
 .status-command {
